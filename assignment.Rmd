@@ -1,0 +1,124 @@
+---
+title: "Machine Learning Assignment"
+author: "Pat O'Keeffe"
+date: "26 February 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+
+The goal of your project is to predict the manner in which people did exercise using health monitoring data collected from a sample of people. The indicator is defined by the "classe" variable. Any other variables in the dataset may be used to build a prediction model which will be used to predict the "classe" variable for the testing dataset comprising 20 observations.
+
+## Model Design Approach
+
+Two datasets were provided as follows:
+
+- pml-training.csv
+
+This data set comprises 19622 observations of 160 Variables.
+
+- pml-testing.csv
+
+This data set comprises 20 observations of 160 variables where classe is not defined and will be predicted by the model.
+
+For the purposes of building and validating the model the provided traninig set was further divided into a training and test set of it's own. 75% of the observations were stored in the sub-training set and the remaining in the sub-test set.
+
+
+## Environment Setup
+
+First we will load the required libraries, set the working directory and load the data.
+
+```{r environment, echo=FALSE}
+library(caret)
+library(dplyr)
+library(rpart)
+
+setwd('d:/dev/coursera/Machine Learning/Assignment')
+test_final <- read.csv('pml-testing.csv')
+train_full <- read.csv('pml-training.csv')
+
+```
+
+
+## Cross Validation & Predictor Reduction
+
+A key step before spliting the training dataset is to use set.seed to ensure the results are reproduceable. Then we split the data for the purposese of cross validation.
+
+```{r cvalidation, echo=FALSE}
+set.seed(3121)
+inTrain = createDataPartition(train_full$X, p = 0.75, list = FALSE)
+
+training <- train_full[inTrain,]
+testing <-  train_full[-inTrain,]
+
+```
+
+First thing to notice is that there are large amounts of missing values. 300 observations have null values across 67 variables - we will remove these variables. I have opted to remove these columns altogether as they are a small number of observations (~2%) of data set. This reduced the number of predictors.
+
+I then reduced the sub-training data set to include only the numeric columns.
+
+```{r predictorselection, echo=FALSE}
+df<-data.frame(colSums(is.na(training)))
+df$name <- rownames(df)
+names(df) <- c('na_count','measure')
+df<- filter (df,na_count>0)
+
+drop <- df$measure
+training <- training[,!(names(training)%in% drop)]
+
+comp_training <- training[complete.cases(training),]
+trn <- sapply(comp_training,is.numeric)
+trn <- comp_training[,trn]
+
+```
+
+There is still a very large set of variables, therefore I will use PCA (Princial Component Analysis) to substitute the variables with a set of predictors which contain the majority of variance and are not highly correlated with one another. PCA analysis of the sub-training set produces 56 PCA Variables. I will use the first 7 as it consititutes
+
+## Principal Component Analysis
+
+```{r PCA, echo=FALSE}
+
+pca_object <- prcomp(trn, center = TRUE, scale. = TRUE)
+pca_var <- pca_object$sdev^2
+pca_var_perc <- pca_var * 100 / sum(pca_var)
+pca_cum <- cumsum(pca_var_perc)
+
+plot(pca_cum,type='b',ylab = 'Cum % Variance', xlab='Principal Component')
+abline(h=60,col="green")
+abline(v=7,col="green")
+```
+
+Based on the curve we can see that 60% of the variance can be described in the first 7 PCAs. I decided to use this no. for the model and see if I need to add to it later. This will reduce computation resources required.
+
+## Expected Sample Error
+
+So now it is time to fit and test the model. For the purposes of this exercise I opted for Random Forest classification tree approach. I tried the rpart library to use a basic classification tree. However, accuracy was only 67% when validated against the test sub-dataset. Linear modeling and GLM models are also not suitable for this type of classifiction problem.
+
+
+```{r Testing, echo=FALSE}
+
+preProc <- preProcess(trn,method='pca', pcaComp = 7)
+
+trainPC1 <- predict(preProc,trn)
+modelFit <- train(x=trainPC1, y=training$classe,method='rf')
+
+testPC <- predict(preProc,testing)
+confusionMatrix(testing$classe,predict(modelFit,testPC))
+
+```
+
+## Prediction
+
+You can see that random forrest accuracy on the test subset of data is 93%. Therefore I choose this to use on for the prediction exercise.
+
+The final prediction results on the 20 Observation test dataset is as follows:
+
+```{r Prediction, echo=FALSE}
+pred <- predict(preProc,test_final)
+predict(modelFit,newdata =  pred)
+```
+
